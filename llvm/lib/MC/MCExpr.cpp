@@ -683,10 +683,10 @@ static bool canFold(const MCAssembler *Asm, const MCSymbolRefExpr *A,
 /// is done (see the object streamer for example) and having the Asm argument
 /// lets us avoid relaxations early.
 static bool
-EvaluateSymbolicAdd(const MCAssembler *Asm, const MCAsmLayout *Layout,
+EvaluateSymbolicOperation(const MCAssembler *Asm, const MCAsmLayout *Layout,
                     const SectionAddrMap *Addrs, bool InSet, const MCValue &LHS,
                     const MCSymbolRefExpr *RHS_A, const MCSymbolRefExpr *RHS_B,
-                    int64_t RHS_Cst, MCValue &Res) {
+                    int64_t RHS_Cst, MCValue &Res, const MCBinaryExpr::Opcode opcode) {
   // FIXME: This routine (and other evaluation parts) are *incredibly* sloppy
   // about dealing with modifiers. This will ultimately bite us, one day.
   const MCSymbolRefExpr *LHS_A = LHS.getSymA();
@@ -694,7 +694,13 @@ EvaluateSymbolicAdd(const MCAssembler *Asm, const MCAsmLayout *Layout,
   int64_t LHS_Cst = LHS.getConstant();
 
   // Fold the result constant immediately.
-  int64_t Result_Cst = LHS_Cst + RHS_Cst;
+
+  int64_t Result_Cst = 0;
+  if (opcode == MCBinaryExpr::Add) {
+    Result_Cst = LHS_Cst + RHS_Cst;
+  } else if (opcode == MCBinaryExpr::Div) {
+    Result_Cst = LHS_Cst / RHS_Cst;
+  }
 
   assert((!Layout || Asm) &&
          "Must have an assembler object if layout is given!");
@@ -883,14 +889,15 @@ bool MCExpr::evaluateAsRelocatableImpl(MCValue &Res, const MCAssembler *Asm,
       case MCBinaryExpr::Sub:
         // Negate RHS and add.
         // The cast avoids undefined behavior if the constant is INT64_MIN.
-        return EvaluateSymbolicAdd(Asm, Layout, Addrs, InSet, LHSValue,
+        return EvaluateSymbolicOperation(Asm, Layout, Addrs, InSet, LHSValue,
                                    RHSValue.getSymB(), RHSValue.getSymA(),
-                                   -(uint64_t)RHSValue.getConstant(), Res);
+                                   -(uint64_t)RHSValue.getConstant(), Res, ABE->getOpcode());
 
       case MCBinaryExpr::Add:
-        return EvaluateSymbolicAdd(Asm, Layout, Addrs, InSet, LHSValue,
+      case MCBinaryExpr::Div:
+        return EvaluateSymbolicOperation(Asm, Layout, Addrs, InSet, LHSValue,
                                    RHSValue.getSymA(), RHSValue.getSymB(),
-                                   RHSValue.getConstant(), Res);
+                                   RHSValue.getConstant(), Res, ABE->getOpcode());
       }
     }
 
